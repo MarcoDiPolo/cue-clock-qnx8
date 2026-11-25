@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cue Clock | Rehearsal monitor</title>
+<style>
+*{box-sizing:border-box}body{margin:0;color:#f5ebdc;background:#19191c;font:18px/1.45 "Segoe UI",sans-serif}
+main{max-width:1470px;padding:30px clamp(22px,4vw,66px);margin:auto}header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #494348;padding:0 0 17px}h1,h2,p{margin:0}.title{font:400 clamp(40px,5vw,70px)/1 Georgia,serif;letter-spacing:-.05em}button{background:#f2c48c;color:#2e211b;border:0;border-radius:4px;padding:12px 21px;font:600 16px "Segoe UI",sans-serif;cursor:pointer}button:disabled{opacity:.55;cursor:default}
+.target{font:14px/1.3 Consolas,monospace;color:#c6bdba;padding:13px 0}.layout{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(310px,1fr);gap:24px}
+.stage,.log{min-width:0;border:1px solid #464043;border-radius:6px;padding:24px}.stage{display:flex;flex-direction:column;min-height:375px;background:radial-gradient(ellipse at 40% 84%,#383139 0%,#242127 65%)}.log{background:#211f22}
+.label{text-transform:uppercase;color:#f2c48c;letter-spacing:.16em;font:600 12px/1.4 Consolas,monospace}.phase{font-weight:400;font-size:22px;margin-top:6px}.caption{display:flex;flex:1;align-items:center;justify-content:center;text-align:center;min-height:206px;font:400 clamp(29px,3.5vw,58px)/1.1 Georgia,serif;white-space:pre-wrap;overflow-wrap:anywhere}.event{font:16px/1.4 Consolas,monospace;color:#edca9a}.log ol{font:clamp(12px,1.05vw,16px)/1.6 Consolas,monospace;list-style:none;padding:0;margin:16px 0 0;overflow:hidden}.log li{overflow-wrap:anywhere;color:#c9c0bd}.log li:last-child{color:white}.log li.expired{color:#ffb481}.summaries{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:18px 0}.summaries article{background:#242227;border-left:3px solid #a78968;padding:12px 17px}.result{font:400 clamp(18px,2.1vw,32px)/1.35 Georgia,serif;margin:3px 0 0}.note{color:#cfc2b8;font-size:16px;max-width:960px}.vtt-frame{font:20px/1.35 Consolas,monospace;text-align:left;white-space:pre-wrap;width:100%}
+@media(max-width:790px){main{padding:20px}.layout{grid-template-columns:1fr}.stage{min-height:260px}.caption{min-height:140px}.log{min-height:220px}.summaries{gap:8px}button{font-size:14px;padding:9px 12px}}
+.summaries{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+.decision{margin:14px 0 0;padding-top:14px;border-top:1px solid #655449}.decision p{margin-bottom:9px}
+.decision button{margin:0 8px 6px 0}.decision button.secondary{background:#423b3c;color:#fae9cf}
+.operator-details{color:#dbcfbe;font-size:15px}.operator-details:empty{display:none}
+</style>
+<main>
+ <header><h1 class="title">Cue Clock</h1><button id="run" type="button">Start rehearsal</button></header>
+ <p id="target" class="target">Waiting for the QNX guest</p>
+ <div class="layout">
+  <section class="stage"><div class="label">Stage captions</div><h2 id="phase" class="phase">Rehearsal monitor</h2>
+   <div id="caption" class="caption" aria-live="polite">The paper moon</div><p id="event" class="event">A five-cue puppet show</p>
+   <div id="decision" class="decision" hidden><p id="decision-prompt" aria-live="polite"></p>
+    <button type="button" data-choice="s" class="secondary">Skip cue</button>
+    <button type="button" data-choice="b">Show briefly</button></div></section>
+  <section class="log"><div class="label">Live serial output</div><ol id="log" aria-label="Recent lines from the guest"></ol></section>
+ </div>
+ <section class="summaries"><article><div class="label">Ordinary rehearsal</div><p id="normal" class="result">Awaiting playback</p></article>
+ <article><div class="label">Delayed rehearsal</div><p id="delayed" class="result">Awaiting playback</p></article>
+ <article id="operator-card" hidden><div class="label">Operator rehearsal</div><p id="operator" class="result">Awaiting playback</p><p id="operator-details" class="operator-details"></p></article></section>
+ <p class="note" id="note">Start the rehearsal to follow the QNX guest's serial output.</p>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let phase, exportLines, completed, session, relay, decisionCue;
+const phases={'CUE CLOCK | ordinary rehearsal':['normal','Ordinary rehearsal','Each caption has its own start and end time. The guest uses one monotonic clock throughout the show.'],
+ 'CUE CLOCK | cue 2 delayed by 950 ms':['delayed','Rehearsal with a 950 ms delay','Cue 2 will miss its window. Watch whether cue 3 still appears before its deadline.'],
+ 'CUE CLOCK | operator rehearsal':['operator','Stage manager’s rehearsal','Choose what the audience should see when the timer reports an expired caption.']};
+const choiceButtons = [...document.querySelectorAll('[data-choice]')];
+function closeDecision() {decisionCue=null; $('decision').hidden=true;}
+function choiceControls(enabled) {for(const button of choiceButtons) button.disabled=!enabled;}
+for(const button of choiceButtons) button.addEventListener('click', async()=>{
+ const cue=decisionCue, run=session;
+ if (!cue || !relay) return;
+ choiceControls(false);
+ $('decision-prompt').textContent='Sending your choice for cue '+cue+'…';
+ try {
+  const response=await fetch('/decision',{method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({rehearsal:run,cue,choice:button.dataset.choice})});
+  if(response.status===503 && decisionCue===cue && session===run) {
+   choiceControls(true);$('decision-prompt').textContent='The local relay is unavailable. Try again or use the target console.';return;
+  }
+  if (!response.ok) throw Error(response.status===409?'This cue is no longer accepting a choice.':'The choice could not be sent. Use the target console.');
+  if(decisionCue===cue && session===run) $('decision-prompt').textContent='Choice sent. Waiting for the QNX guest.';
+ } catch(error) {
+  if(decisionCue===cue && session===run) $('decision-prompt').textContent=error.message;
+ }
+});
+function setCaption(text) { $('caption').textContent = text; }
+function record(line) {
+ const item=document.createElement('li'); item.textContent=line;
+ if(line.includes('EXPIRED cue')) item.className='expired';
+ $('log').append(item); while($('log').children.length>12) $('log').firstChild.remove();
+ if(line.startsWith('Target: ')) $('target').textContent=line.slice(8)+'   ·   QEMU serial console';
+ if(Object.hasOwn(phases,line)) {
+  const [key,title,note]=phases[line]; phase=key; closeDecision(); setCaption('');
+  $('caption').classList.remove('vtt-frame'); $('phase').textContent=title; $('note').textContent=note;
+  if(phase==='operator') $('operator-card').hidden=false;
+  return;
+ }
+ if(line==='CUE CLOCK | subtitle export') {
+  closeDecision();phase='vtt'; $('phase').textContent='WebVTT export'; $('caption').classList.add('vtt-frame');
+  setCaption(''); $('event').textContent='Exporting the original cue sheet'; return;
+ }
+ if(line==='CUE CLOCK | rehearsal complete') {
+  closeDecision();completed=true; $('event').textContent='The QNX guest finished the demonstration.';
+  $('note').textContent='The WebVTT export preserves the original caption times.'; return;
+ }
+ if(phase==='vtt') {
+  if(exportLines.length<7) {exportLines.push(line);setCaption(exportLines.join('\n'));}
+  return;
+ }
+ let match=line.match(/^(?:\[\d+\] )?DECISION cue (\d+)\b/);
+ if(match){decisionCue=Number(match[1]);$('decision').hidden=false;choiceControls(relay);
+  $('decision-prompt').textContent=relay?'Cue '+decisionCue+' has expired. Skip it or show it briefly?':'Cue '+decisionCue+' has expired. Choose in the QNX target console.';return;}
+ match=line.match(/^(?:\[\d+\] )?CHOICE cue (\d+) \| (skip|brief|timeout)\b/);
+ if(match){closeDecision();const wording={skip:'skipped by operator',brief:'brief display chosen',timeout:'decision timed out'};
+  $('operator-details').textContent='Cue '+match[1]+' · '+wording[match[2]];return;}
+ if(line.startsWith('Operator: ')) {$('operator-details').textContent=line.slice(10);return;}
+ match=line.match(/^\[(\d+)\] SHOW cue (\d+) \| late (\d+) \| (.*)$/);
+ if(match){setCaption(match[4]);$('event').textContent='Cue '+match[2]+'  ·  shown at '+match[1]+' ms';return;}
+ match=line.match(/^\[(\d+)\] (CLEAR|EXPIRED) cue (\d+)/);
+ if(match){setCaption('');$('event').textContent='Cue '+match[3]+'  ·  '+match[2].toLowerCase()+' at '+match[1]+' ms';return;}
+ match=line.match(/^Summary: (\d+) presented, (\d+) expired\./);
+ if(match && ['normal','delayed','operator'].includes(phase)) $(phase).textContent=match[1]+(phase==='operator'?' in window, ':' shown, ')+match[2]+' expired';
+}
+$('run').addEventListener('click',async()=>{
+ $('run').disabled=true; $('log').replaceChildren();phase=null;exportLines=[];completed=false;session=null;relay=false;closeDecision();
+ $('caption').classList.remove('vtt-frame');setCaption('Waiting for the first cue…');$('phase').textContent='Connecting to the rehearsal';
+ $('target').textContent='Waiting for target identification';$('normal').textContent=$('delayed').textContent=$('operator').textContent='Awaiting playback';
+ $('operator-card').hidden=true;$('operator-details').textContent='';
+ try {
+  const response=await fetch('/rehearse',{cache:'no-store'}); if(!response.ok) throw Error(response.status===409?'Another window is following this rehearsal.':'Guest stream unavailable');
+  session=response.headers.get('X-Rehearsal-Id');relay=response.headers.get('X-Decision-Relay')==='enabled';
+  const reader=response.body.pipeThrough(new TextDecoderStream()).getReader(); let pending='';
+  for(;;) {
+   const {value,done}=await reader.read(); if(done) break;
+   pending+=value; const lines=pending.split('\n');pending=lines.pop();
+   for(const line of lines) if(line) record(JSON.parse(line));
+  }
+  if(!completed) throw Error('The guest stopped before the rehearsal finished.');
+ } catch(error) {$('event').textContent=error.message;}
+ finally {closeDecision();session=null;$('run').textContent='Replay rehearsal';$('run').disabled=false;}
+});
+</script>
+</html>

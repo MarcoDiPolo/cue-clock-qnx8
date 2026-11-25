@@ -1,0 +1,20 @@
+[virtual=x86_64,multiboot] .bootstrap = {
+    startup-x86 -D 8250
+    procnto-smp-instr
+}
+
+[+script] .script = {
+    procmgr_symlink /proc/boot/ldqnx-64.so.2 /usr/lib/ldqnx-64.so.2
+    display_msg "CUE CLOCK | ordinary rehearsal"
+    /proc/boot/cue-clock /proc/boot/rehearsal.txt
+    display_msg "CUE CLOCK | cue 2 delayed by 950 ms"
+    /proc/boot/cue-clock /proc/boot/rehearsal.txt --delay-cue 2 950
+    display_msg "CUE CLOCK | subtitle export"
+    /proc/boot/cue-clock /proc/boot/rehearsal.txt --vtt
+    display_msg "CUE CLOCK | rehearsal complete"
+}
+
+ldqnx-64.so.2
+[autoso=add]
+[perms=0555] cue-clock=./cue-clock
+[perms=0444] rehearsal.txt=./rehearsal.txt

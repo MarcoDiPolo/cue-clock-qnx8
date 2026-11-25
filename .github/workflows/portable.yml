@@ -1,0 +1,17 @@
+name: Portable C checks
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  cue-sheet-and-playback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build portable timing path
+        run: cc -std=c11 -Wall -Wextra -Werror -O2 -o cue-clock cue_clock.c
+      - name: Rehearse and export captions
+        run: python3 test_cues.py ./cue-clock

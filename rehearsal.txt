@@ -1,0 +1,6 @@
+# Start and end in milliseconds from the beginning of the performance.
+0|700|[Three soft chimes]
+850|1650|A paper moon appears above the stage.
+1750|2400|[Footsteps approach from the left]
+2500|3600|The last window lights up.
+3850|4600|[Silence]

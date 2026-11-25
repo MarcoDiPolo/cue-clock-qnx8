@@ -1,0 +1,6 @@
+# The long scene change gives the stage manager time to decide about cue 2.
+0|700|[Three soft chimes]
+850|1650|A paper moon appears above the stage.
+9300|10100|[Footsteps approach from the left]
+10300|11500|The last window lights up.
+11700|12500|[Silence]

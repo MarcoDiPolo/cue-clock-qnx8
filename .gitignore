@@ -1,0 +1,6 @@
+/cue-clock
+/cue-clock.exe
+*.ifs
+*.qpkg
+/presentation/
+__pycache__/
